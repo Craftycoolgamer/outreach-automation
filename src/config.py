@@ -79,15 +79,15 @@ EXCLUDED_EMAIL_PATTERNS = [
 
 # Priority keywords for email selection
 EMAIL_PRIORITY_KEYWORDS = [
-    "sales",
-    "business",
-    "partnerships",
     "partnership",
+    "partnerships",
+    "info",
     "hello",
     "contact",
+    "sales",
+    "business",
     "support",
     "service",
-    "info",
 ]
 
 # Sheet column names (6-column format)
