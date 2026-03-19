@@ -3,6 +3,7 @@
 import re
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import urljoin, urlparse
 from typing import Optional
 
@@ -12,7 +13,15 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
-from config import REQUEST_TIMEOUT, MAX_RETRIES, USER_AGENT
+from config import (
+    REQUEST_TIMEOUT,
+    MAX_RETRIES,
+    USER_AGENT,
+    CONTACT_PATHS,
+    EMAIL_PATTERNS,
+    EXCLUDED_EMAIL_PATTERNS,
+    EMAIL_PRIORITY_KEYWORDS,
+)
 
 debug_log_path = Path(__file__).resolve().parent.parent / "scraper_debug.log"
 
@@ -31,41 +40,6 @@ if not logger.handlers:
 
 class CompanyResearcher:
     """Researches company websites to find contact information."""
-
-    # Pages to check for contact info
-    CONTACT_PATHS = [
-        "/contact",
-        "/contact-us",
-        "/about",
-        "/about-us",
-        "/team",
-        "/company",
-        "/support",
-        "/help",
-        "/sales",
-        "/get-in-touch",
-        "/reach-out",
-    ]
-
-    # Email patterns (common business email patterns)
-    EMAIL_PATTERNS = [
-        r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',  # Standard email
-        r'mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',  # mailto links
-    ]
-
-    # Excluded email patterns (no-reply, noreply, etc.)
-    EXCLUDED_PATTERNS = [
-        r'noreply',
-        r'no[_\-]?reply',
-        r'do[_\-]?not[_\-]?reply',
-        r'unsubscribe',
-        r'postmaster',
-        r'webmaster',
-        r'hostmaster',
-        r'admin@',
-        r'root@',
-        r'hello@',  # Generic but often monitored
-    ]
 
     def __init__(self):
         self.session = requests.Session()
@@ -225,22 +199,20 @@ class CompanyResearcher:
         emails = []
         seen = set()
 
-        for pattern in self.EMAIL_PATTERNS:
+        for pattern in EMAIL_PATTERNS:
             matches = re.findall(pattern, html)
             for match in matches:
                 if isinstance(match, tuple):
                     match = match[0]
                 email = match.lower().strip()
 
-                # Skip excluded patterns
                 should_skip = any(
                     re.search(excluded, email, re.IGNORECASE)
-                    for excluded in self.EXCLUDED_PATTERNS
+                    for excluded in EXCLUDED_EMAIL_PATTERNS
                 )
                 if should_skip:
                     continue
 
-                # Basic validation
                 if "@" in email and "." in email.split("@")[1]:
                     if email not in seen:
                         seen.add(email)
@@ -278,12 +250,36 @@ class CompanyResearcher:
             href = link.get("href", "").lower()
             link_text = link.get_text().lower()
 
-            if any(path in href for path in self.CONTACT_PATHS):
+            if any(path in href for path in CONTACT_PATHS):
                 full_url = urljoin(base_url, href)
                 if full_url not in forms:
                     forms.append(full_url)
 
         return forms
+
+    def _fetch_and_parse_page(self, page_url: str) -> dict:
+        """Fetch a single page and extract emails/forms.
+        
+        Args:
+            page_url: URL to fetch
+            
+        Returns:
+            Dict with 'url', 'emails', 'forms', or None if fetch failed
+        """
+        page_html = self._get_page(page_url)
+        if not page_html:
+            return None
+        
+        emails = self._extract_emails(page_html, page_url)
+        
+        soup = BeautifulSoup(page_html, "lxml")
+        forms = self._find_contact_forms(soup, page_url)
+        
+        return {
+            "url": page_url,
+            "emails": emails,
+            "forms": forms,
+        }
 
     def research_company(self, company_name: str, website: str) -> dict:
         """Research a company website for contact information.
@@ -313,25 +309,27 @@ class CompanyResearcher:
             homepage_forms = self._find_contact_forms(soup, base_url)
             all_forms.extend(homepage_forms)
 
-        # Check contact pages
-        for path in self.CONTACT_PATHS:
+        # Build list of contact page URLs to check
+        contact_urls = []
+        for path in CONTACT_PATHS:
             page_url = urljoin(base_url, path)
-            if page_url in pages_checked:
-                continue
+            if page_url not in pages_checked:
+                contact_urls.append(page_url)
 
-            time.sleep(0.5)  # Be polite
-
-            page_html = self._get_page(page_url)
-            if not page_html:
-                continue
-
-            pages_checked.append(page_url)
-            page_emails = self._extract_emails(page_html, page_url)
-            all_emails.extend(page_emails)
-
-            soup = BeautifulSoup(page_html, "lxml")
-            page_forms = self._find_contact_forms(soup, page_url)
-            all_forms.extend(page_forms)
+        # Fetch all contact pages in parallel
+        if contact_urls:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(self._fetch_and_parse_page, url): url
+                    for url in contact_urls
+                }
+                
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        pages_checked.append(result["url"])
+                        all_emails.extend(result["emails"])
+                        all_forms.extend(result["forms"])
 
         # Remove duplicates while preserving order
         seen_emails = set()
@@ -376,14 +374,11 @@ class CompanyResearcher:
         if domain_emails:
             emails = domain_emails
 
-        # Prefer common business emails over random ones
-        priority_keywords = ["sales", "business", "partnerships", "partnership", "hello", "contact", "support", "service", "info"]
-        for keyword in priority_keywords:
+        for keyword in EMAIL_PRIORITY_KEYWORDS:
             for email in emails:
                 if keyword in email:
                     return email
 
-        # Return first email (they're already ordered by discovery priority)
         return emails[0]
 
 

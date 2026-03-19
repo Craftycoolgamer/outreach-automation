@@ -42,6 +42,54 @@ USER_AGENT = os.getenv(
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 
+# Contact page paths to check
+CONTACT_PATHS = [
+    "/contact",
+    "/contact-us",
+    "/about",
+    "/about-us",
+    "/team",
+    "/company",
+    "/support",
+    "/help",
+    "/sales",
+    "/get-in-touch",
+    "/reach-out",
+]
+
+# Email patterns to extract
+EMAIL_PATTERNS = [
+    r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+    r'mailto:([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
+]
+
+# Email patterns to exclude (no-reply, admin, etc.)
+EXCLUDED_EMAIL_PATTERNS = [
+    r'noreply',
+    r'no[_\-]?reply',
+    r'do[_\-]?not[_\-]?reply',
+    r'unsubscribe',
+    r'postmaster',
+    r'webmaster',
+    r'hostmaster',
+    r'admin@',
+    r'root@',
+    r'hello@',
+]
+
+# Priority keywords for email selection
+EMAIL_PRIORITY_KEYWORDS = [
+    "sales",
+    "business",
+    "partnerships",
+    "partnership",
+    "hello",
+    "contact",
+    "support",
+    "service",
+    "info",
+]
+
 # Sheet column names (6-column format)
 COLUMN_DATE = "date"
 COLUMN_COMPANY = "company"
