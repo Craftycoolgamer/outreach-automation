@@ -93,7 +93,7 @@ class OutreachSheet:
         """Get all records from the sheet as list of dicts.
         
         Only returns the first 6 columns (A-F) to avoid issues with
-        extra columns that may exist in the sheet.
+        extra columns that may exist in the sheet. Filters out empty rows.
         """
         # Get all values from the sheet
         all_values = self.worksheet.get_all_values()
@@ -110,7 +110,10 @@ class OutreachSheet:
             # Pad row with empty strings if it's shorter than 6 columns
             row_values = (row + [""] * 6)[:6]
             record = {headers[i]: row_values[i] for i in range(len(headers))}
-            records.append(record)
+            
+            # Only include rows that have a company and website (required fields)
+            if _row_has_company_and_website(record):
+                records.append(record)
         
         return records
 

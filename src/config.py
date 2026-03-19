@@ -108,10 +108,14 @@ STATUS_MANUAL_SUBMITTED = "Manual"
 STATUS_SKIPPED = "Skipped"
 STATUS_FAILED = "Failed"
 
+# Maximum number of workers for parallel processing
+SCRAPER_MAX_WORKERS = 8
+
 # Method values
 METHOD_EMAIL = "Email"
 METHOD_CONTACT_FORM = "Forum"
 METHOD_MANUAL = "Manual"
+METHOD_MISSING = "Missing"
 
 # Valid status transitions
 VALID_STATUSES = [

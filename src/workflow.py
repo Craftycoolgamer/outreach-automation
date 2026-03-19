@@ -17,6 +17,7 @@ from config import (
     METHOD_EMAIL,
     METHOD_CONTACT_FORM,
     METHOD_MANUAL,
+    METHOD_MISSING,
     DAILY_EMAIL_LIMIT,
     COLUMN_COMPANY,
     COLUMN_WEBSITE,
@@ -78,18 +79,21 @@ class OutreachWorkflow:
                 self.sheet.update_row(row_idx, "no_website", METHOD_MANUAL, STATUS_SKIPPED)
                 continue
 
-            print(f"\n{'=' * 60}")
-            print(f"Researching: {company}")
-            print(f"Website: {website}")
-            print(f"{'=' * 60}")
+            if not auto_approve:
+                print(f"\n{'=' * 60}")
+                print(f"Researching: {company}")
+                print(f"Website: {website}")
+                print(f"{'=' * 60}")
 
             # Research the company
             result = self.researcher.research_company(company, website)
-            print(format_research_result(result))
+            if not auto_approve:
+                print(format_research_result(result))
 
             # Determine next action
             if result["best_email"]:
-                print(f"\n>>> Found email: {result['best_email']}")
+                if not auto_approve:
+                    print(f"\n>>> Found email: {result['best_email']}")
 
                 if auto_approve:
                     self._update_for_email(row_idx, result["best_email"], auto_send=False)
@@ -97,18 +101,21 @@ class OutreachWorkflow:
                     self._interactive_email_decision(row_idx, company, result)
 
             elif result["best_form"]:
-                print(f"\n>>> No email found, but contact form available: {result['best_form']}")
+                if not auto_approve:
+                    print(f"\n>>> No email found, but contact form available: {result['best_form']}")
                 self._interactive_form_decision(row_idx, company, result)
 
             else:
-                print(f"\n>>> No contact method found")
+                if not auto_approve:
+                    print(f"\n>>> No contact method found")
                 self.sheet.update_row(
                     row_idx,
-                    "none_found",
-                    METHOD_MANUAL,
+                    "None Found",
+                    METHOD_MISSING,
                     STATUS_FAILED
                 )
-                print(f"Marked as failed - no contact found")
+                if not auto_approve:
+                    print(f"Marked as failed - no contact found")
 
     def _interactive_email_decision(self, row_idx: int, company: str, result: dict):
         """Interactive prompt for email outreach decision."""
@@ -191,7 +198,7 @@ class OutreachWorkflow:
         else:
             # Mark for later review
             self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_READY_TO_SEND)
-            print(f"Marked as ready to send to: {email}")
+            print(f"{self.sheet.worksheet.row_values(row_idx)[1]} - Marked as ready to send to: {email}")
 
     def _save_draft_local(self, row_idx: int, company: str, email: str):
         """Save email draft locally for review."""
@@ -204,6 +211,30 @@ class OutreachWorkflow:
         self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_READY_TO_SEND)
         print(f"Draft saved to: {draft_file}")
         print("Review the file, then run 'python workflow.py --send' to send")
+
+    def display_ready_to_send(self, limit: int = DAILY_EMAIL_LIMIT):
+        """Display all emails ready to send for confirmation."""
+        ready = self.sheet.get_ready_to_send()
+
+        if not ready:
+            print("No emails ready to send.")
+            return False
+
+        ready_to_display = ready[:limit]
+        print(f"\n{'=' * 80}")
+        print(f"READY TO SEND ({len(ready_to_display)} email{'s' if len(ready_to_display) != 1 else ''})")
+        print(f"{'=' * 80}\n")
+
+        print(f"{'Company':<40} | {'Email Address':<35}")
+        print(f"{'-' * 40}-+-{'-' * 35}")
+
+        for row_idx, row in ready_to_display:
+            company = row.get(COLUMN_COMPANY, "")[:40]
+            email = row.get(COLUMN_CONTACT, "")[:35]
+            print(f"{company:<40} | {email:<35}")
+
+        print(f"\n{'=' * 80}")
+        return True
 
     def send_approved_emails(self, limit: int = DAILY_EMAIL_LIMIT):
         """Send all emails marked as 'ready_to_send'."""
@@ -314,20 +345,20 @@ class OutreachWorkflow:
             STATUS_MANUAL_SUBMITTED: 0,
             STATUS_SKIPPED: 0,
             STATUS_FAILED: 0,
-            "other": 0,
         }
 
+        unrecognized = {}
         for record in records:
-            status = record.get(COLUMN_STATUS, "")
+            status = record.get(COLUMN_STATUS, "").strip()
             if status in counts:
                 counts[status] += 1
-            else:
-                counts["other"] += 1
+            elif status:
+                unrecognized[status] = unrecognized.get(status, 0) + 1
 
         print(f"\n{'=' * 50}")
         print("OUTREACH STATUS SUMMARY")
         print(f"{'=' * 50}")
-        print(f"New (pending research):        {counts[STATUS_NEW]:>4}")
+        print(f"New (pending research):          {counts[STATUS_NEW]:>4}")
         print(f"Researched:                      {counts[STATUS_RESEARCHED]:>4}")
         print(f"Ready to send:                   {counts[STATUS_READY_TO_SEND]:>4}")
         print(f"Sent:                            {counts[STATUS_SENT]:>4}")
@@ -337,6 +368,11 @@ class OutreachWorkflow:
         print(f"Failed:                          {counts[STATUS_FAILED]:>4}")
         print(f"{'=' * 50}")
         print(f"Total:                           {len(records):>4}")
+        
+        if unrecognized:
+            print(f"\nUnrecognized statuses:")
+            for status, count in sorted(unrecognized.items()):
+                print(f"  {status}: {count}")
 
 
 def main():
@@ -346,7 +382,7 @@ def main():
         epilog="""
 Examples:
   python workflow.py --research              # Research all pending companies
-  python workflow.py --research --auto       # Auto-approve findings
+  python workflow.py --research --auto       # Auto-approve findings + batch confirm before sending
   python workflow.py --send                  # Send approved emails
   python workflow.py --status                # Show status summary
   python workflow.py --manual-forms          # Show forms needing submission
@@ -382,10 +418,18 @@ Examples:
 
     workflow = OutreachWorkflow(dry_run=args.dry_run)
 
-    if args.research:
-        workflow.research_pending(auto_approve=args.auto)
+    if args.research and args.auto:
+        workflow.research_pending(auto_approve=True)
+        if workflow.display_ready_to_send(limit=args.limit):
+            confirm = input("\nConfirm sending these emails? (y/n): ").strip().lower()
+            if confirm == "y":
+                workflow.send_approved_emails(limit=args.limit)
+            else:
+                print("Cancelled. Emails marked as ready but not sent.")
+    elif args.research:
+        workflow.research_pending(auto_approve=False)
 
-    if args.send:
+    if args.send and not (args.research and args.auto):
         workflow.send_approved_emails(limit=args.limit)
 
     if args.status:

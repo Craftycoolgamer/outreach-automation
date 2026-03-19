@@ -21,6 +21,7 @@ from config import (
     EMAIL_PATTERNS,
     EXCLUDED_EMAIL_PATTERNS,
     EMAIL_PRIORITY_KEYWORDS,
+    SCRAPER_MAX_WORKERS,
 )
 
 debug_log_path = Path(__file__).resolve().parent.parent / "scraper_debug.log"
@@ -318,7 +319,7 @@ class CompanyResearcher:
 
         # Fetch all contact pages in parallel
         if contact_urls:
-            with ThreadPoolExecutor(max_workers=4) as executor:
+            with ThreadPoolExecutor(max_workers=SCRAPER_MAX_WORKERS) as executor:
                 futures = {
                     executor.submit(self._fetch_and_parse_page, url): url
                     for url in contact_urls
