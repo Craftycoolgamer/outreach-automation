@@ -6,7 +6,7 @@ I'm {{sender_name}} from {{sender_company}}, and I'm hoping to get in touch with
 
 If this email reached sales or support, would you mind forwarding it to the appropriate contact? This is regarding a potential strategic partnership, not a service inquiry.
 
-We're impressed with {{company_name}}'s work in {{industry}} and believe there may be complementary opportunities between our organizations.
+We're impressed with {{company_name}}'s work in the industry and believe there may be complementary opportunities between our organizations.
 
 A brief 10-15 minute call to explore possibilities would be greatly appreciated.
 

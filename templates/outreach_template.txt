@@ -6,7 +6,7 @@ I'm reaching out from {{sender_company}} to explore a potential partnership oppo
 
 I may have reached the sales or support team - if so, could you kindly forward this to your partnerships or business development team? I'd appreciate the connection.
 
-After reviewing {{company_name}}'s work in {{industry}}, I believe there could be valuable synergies between our organizations that would benefit both our customer bases.
+After reviewing {{company_name}}'s work in the industry, I believe there could be valuable synergies between our organizations that would benefit both our customer bases.
 
 Would it be possible to arrange a brief introductory call with the appropriate team member?
 
