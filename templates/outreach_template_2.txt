@@ -1,0 +1,17 @@
+Subject: Partnership Opportunity
+
+Hello,
+
+My name is {{sender_name}}, and I lead business development at {{sender_company}}. I'm reaching out to explore partnership possibilities with {{company_name}}.
+
+If you're on the sales or support team, I'd be grateful if you could pass this along to your partnerships or business development contact. This isn't a sales pitch for your services - rather, I'd like to discuss how our companies might collaborate.
+
+{{company_name}}'s position in the {{industry}} space aligns well with what we're building at {{sender_company}}, and I see potential for a mutually beneficial partnership.
+
+Could you help me connect with the right person on your partnerships team?
+
+Best regards,
+{{sender_name}}
+{{sender_title}}
+{{sender_company}}
+{{sender_phone}}
