@@ -55,12 +55,13 @@ class OutreachWorkflow:
                 print(f"Warning: Email not configured. {e}")
                 print("To enable: Add EMAIL_USER, EMAIL_PASSWORD, and SMTP_SERVER to .env")
 
-    def research_pending(self, auto_approve: bool = False):
+    def research_pending(self, auto_approve: bool = False, limit: Optional[int] = None):
         """Research all companies with 'new' status.
 
         Args:
             auto_approve: If True, mark emails as ready_to_send without review
                          (not recommended for production)
+            limit: Maximum number of companies to process. If None, process all.
         """
         pending = self.sheet.get_pending_research()
 
@@ -68,7 +69,15 @@ class OutreachWorkflow:
             print("No companies pending research.")
             return
 
-        print(f"Found {len(pending)} companies to research\n")
+        total_pending = len(pending)
+        if limit is not None:
+            pending = pending[:limit]
+
+        print(f"Found {total_pending} companies to research")
+        if limit is not None:
+            print(f"Processing {len(pending)} compan{'ies' if len(pending) != 1 else 'y'}\n")
+        else:
+            print()
 
         for row_idx, row in pending:
             company = row.get(COLUMN_COMPANY, "")
@@ -382,6 +391,7 @@ def main():
         epilog="""
 Examples:
   python workflow.py --research              # Research all pending companies
+  python workflow.py --research-one          # Research only one pending company
   python workflow.py --research --auto       # Auto-approve findings + batch confirm before sending
   python workflow.py --send                  # Send approved emails
   python workflow.py --status                # Show status summary
@@ -393,6 +403,8 @@ Examples:
 
     parser.add_argument("--research", action="store_true",
                         help="Research all companies with 'new' status")
+    parser.add_argument("--research-one", action="store_true",
+                        help="Research only the next company with 'new' status")
     parser.add_argument("--auto", action="store_true",
                         help="Auto-approve research findings (use with --research)")
     parser.add_argument("--send", action="store_true",
@@ -418,6 +430,10 @@ Examples:
 
     workflow = OutreachWorkflow(dry_run=args.dry_run)
 
+    if args.research and args.research_one:
+        print("Use either --research or --research-one, not both.")
+        return
+
     if args.research and args.auto:
         workflow.research_pending(auto_approve=True)
         if workflow.display_ready_to_send(limit=args.limit):
@@ -426,8 +442,18 @@ Examples:
                 workflow.send_approved_emails(limit=args.limit)
             else:
                 print("Cancelled. Emails marked as ready but not sent.")
+    elif args.research_one and args.auto:
+        workflow.research_pending(auto_approve=True, limit=1)
+        if workflow.display_ready_to_send(limit=args.limit):
+            confirm = input("\nConfirm sending these emails? (y/n): ").strip().lower()
+            if confirm == "y":
+                workflow.send_approved_emails(limit=args.limit)
+            else:
+                print("Cancelled. Emails marked as ready but not sent.")
     elif args.research:
         workflow.research_pending(auto_approve=False)
+    elif args.research_one:
+        workflow.research_pending(auto_approve=False, limit=1)
 
     if args.send and not (args.research and args.auto):
         workflow.send_approved_emails(limit=args.limit)
