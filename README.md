@@ -112,6 +112,18 @@ The system uses SMTP to send emails, which works with any email provider.
 4. Copy the Sheet ID from the URL (the long string between `/d/` and `/edit`)
 5. Add it to your `.env` file
 
+### 6. Template Database
+
+Email templates are now stored in the SQLite application database at `outreach.db`.
+
+The `templates` table stores:
+- `name`
+- `subject`
+- `text_body_path` - path to a `.txt` file in `templates/`
+- `html_body_path` - path to a `.html` file in `templates/`
+
+Both linked files must exist inside `templates/` or the email client will raise an error during startup.
+
 ## Usage
 
 ### Add Companies to Research
@@ -192,11 +204,23 @@ python3 src/workflow.py --status
 
 ## Customizing Email Templates
 
-Edit `templates/outreach_template.txt`:
+Update the linked body files in `templates/` and the matching row in `db.db`.
+
+Example schema:
+
+```sql
+CREATE TABLE templates (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   name TEXT NOT NULL UNIQUE,
+   subject TEXT NOT NULL,
+   text_body_path TEXT NOT NULL,
+   html_body_path TEXT NOT NULL
+);
+```
+
+Example text body file:
 
 ```
-Subject: Partnership Opportunity with {{company_name}}
-
 Hi {{company_name}} Team,
 
 Your custom message here...
@@ -224,7 +248,9 @@ outreach-automation/
 │   ├── email_client.py    # SMTP email client
 │   └── workflow.py        # Main workflow orchestrator
 ├── templates/
-│   └── outreach_template.txt
+│   ├── outreach_template_nickd.txt
+│   └── outreach_template_nickd.html
+├── outreach.db            # SQLite application database
 ├── .env                   # Your environment variables (not in git)
 ├── .env.example           # Example environment file
 ├── credentials.json       # Google Sheets service account key

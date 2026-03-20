@@ -25,14 +25,10 @@ SENDER_PHONE = os.getenv("SENDER_PHONE")
 
 # Template directory
 TEMPLATE_DIR = BASE_DIR / "templates"
+DATABASE_PATH = BASE_DIR / "db.db"
 
 # Outreach limits
 DAILY_EMAIL_LIMIT = int(os.getenv("DAILY_EMAIL_LIMIT", "50"))
-
-# Email templates (randomly selected when sending)
-EMAIL_TEMPLATES = sorted(
-    str(p) for p in TEMPLATE_DIR.glob("*template*.txt")
-)
 
 # Scraping
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "10"))
