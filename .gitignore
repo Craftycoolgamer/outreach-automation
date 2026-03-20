@@ -6,6 +6,9 @@ credentials.json
 gmail_credentials.json
 gmail_token.json
 
+#templates
+templates/
+
 # Python
 __pycache__/
 *.py[cod]
