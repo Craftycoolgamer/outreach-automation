@@ -110,12 +110,33 @@ class OutreachSheet:
             # Pad row with empty strings if it's shorter than 6 columns
             row_values = (row + [""] * 6)[:6]
             record = {headers[i]: row_values[i] for i in range(len(headers))}
-            
+
             # Only include rows that have a company and website (required fields)
             if _row_has_company_and_website(record):
                 records.append(record)
         
         return records
+
+    def _iter_valid_rows(self) -> list[tuple[int, dict]]:
+        """Return valid rows with their actual worksheet row numbers.
+
+        This preserves true row indices from the sheet so updates are applied to
+        the correct rows even when there are blank/invalid rows between entries.
+        """
+        all_values = self.worksheet.get_all_values()
+        if not all_values or len(all_values) < 1:
+            return []
+
+        headers = all_values[0][:6]
+        rows: list[tuple[int, dict]] = []
+
+        for row_index, row in enumerate(all_values[1:], start=2):
+            row_values = (row + [""] * 6)[:6]
+            record = {headers[i]: row_values[i] for i in range(len(headers))}
+            if _row_has_company_and_website(record):
+                rows.append((row_index, record))
+
+        return rows
 
     def get_rows_by_status(self, status: str) -> list[dict]:
         """Get all rows with a specific status."""
@@ -199,10 +220,9 @@ class OutreachSheet:
         Returns:
             List of tuples (row_index, row_data)
         """
-        records = self.get_all_records()
         pending = []
 
-        for idx, record in enumerate(records, start=2):  # start=2 because row 1 is header
+        for idx, record in self._iter_valid_rows():
             status = record.get(COLUMN_STATUS, "")
             if status in [STATUS_NEW, ""] and _row_has_company_and_website(record):
                 pending.append((idx, record))
@@ -211,10 +231,9 @@ class OutreachSheet:
 
     def get_ready_to_send(self) -> list[tuple[int, dict]]:
         """Get all rows ready to send with their row indices."""
-        records = self.get_all_records()
         ready = []
 
-        for idx, record in enumerate(records, start=2):
+        for idx, record in self._iter_valid_rows():
             status = record.get(COLUMN_STATUS, "")
             method = record.get(COLUMN_METHOD, "")
             if status == STATUS_READY_TO_SEND and method == METHOD_EMAIL:
@@ -224,10 +243,9 @@ class OutreachSheet:
 
     def get_needs_manual_submission(self) -> list[tuple[int, dict]]:
         """Get all rows needing manual contact form submission."""
-        records = self.get_all_records()
         needs_manual = []
 
-        for idx, record in enumerate(records, start=2):
+        for idx, record in self._iter_valid_rows():
             status = record.get(COLUMN_STATUS, "")
             method = record.get(COLUMN_METHOD, "")
             if status == STATUS_FORM_NEEDED and method == METHOD_CONTACT_FORM:
