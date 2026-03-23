@@ -1,6 +1,5 @@
 """SMTP email client for sending outreach emails."""
 
-import random
 import smtplib
 import ssl
 from dataclasses import dataclass
@@ -29,7 +28,7 @@ class RenderedTemplate:
 
 
 class SmtpOutreach:
-    """Sends outreach emails via SMTP with random template selection."""
+    """Sends outreach emails via SMTP with explicit template selection."""
 
     def __init__(self, db_path: Optional[str] = None):
         """Initialize SMTP client.
@@ -60,10 +59,6 @@ class SmtpOutreach:
     def _load_templates(self) -> list[TemplateRecord]:
         """Load all email templates from the SQLite application store."""
         return self.template_store.load_templates()
-
-    def _get_random_template(self) -> TemplateRecord:
-        """Randomly select a template from available templates."""
-        return random.choice(self.templates)
 
     def _render_template(
         self,
@@ -116,9 +111,12 @@ class SmtpOutreach:
         **template_vars,
     ) -> MIMEMultipart:
         """Prepare email message with template substitution."""
-        rendered_template = None
         if subject is None or body is None or html_body is None:
-            selected_template = template or self._get_random_template()
+            if template is None:
+                raise ValueError(
+                    "No template selected. Choose a template before sending."
+                )
+            selected_template = template
             rendered_template = self._render_template(
                 selected_template,
                 company_name,
@@ -158,14 +156,21 @@ class SmtpOutreach:
             company_name: Name of the company (for logging)
             subject: Email subject (uses template if not provided)
             body: Email body (uses template if not provided)
-            template: Specific template to use (randomly selects if not provided)
+            template: Specific template to use (required unless full subject/body/html provided)
             **template_vars: Variables to substitute in template
 
         Returns:
             Dict with success status and template used
         """
-        # Select template if not provided
-        selected_template = template or self._get_random_template()
+        if template is None and (subject is None or body is None or html_body is None):
+            return {
+                "success": False,
+                "error": "No template selected. Choose a template before sending.",
+                "to": to_email,
+                "company": company_name,
+            }
+
+        selected_template = template
         
         message = self._prepare_message(
             to_email,
@@ -190,7 +195,7 @@ class SmtpOutreach:
                 "to": to_email,
                 "company": company_name,
                 "from": EMAIL_USER,
-                "template_used": selected_template.id,
+                "template_used": selected_template.id if selected_template else None,
             }
 
         except smtplib.SMTPAuthenticationError as e:
@@ -245,8 +250,19 @@ class SmtpOutreach:
 
                     to_email = recipient["email"]
                     company_name = recipient["company_name"]
-                    # Randomly select template for each email
-                    selected_template = self._get_random_template()
+                    selected_template = recipient.get("template")
+                    if selected_template is None and (
+                        recipient.get("subject") is None
+                        or recipient.get("body") is None
+                        or recipient.get("html_body") is None
+                    ):
+                        results.append({
+                            "success": False,
+                            "error": "No template selected. Choose a template before sending.",
+                            "to": to_email,
+                            "company": company_name,
+                        })
+                        continue
 
                     message = self._prepare_message(
                         to_email,
@@ -264,7 +280,7 @@ class SmtpOutreach:
                             "success": True,
                             "to": to_email,
                             "company": company_name,
-                            "template_used": selected_template.id,
+                            "template_used": selected_template.id if selected_template else None,
                         })
                     except Exception as e:
                         results.append({
@@ -288,12 +304,14 @@ class SmtpOutreach:
         to_email: str,
         **template_vars,
     ) -> dict:
-        """Generate a preview using a randomly selected template.
+        """Generate a preview for a selected template.
         
         Returns:
             Dict with subject, body, preview text, and template number used
         """
-        selected_template = self._get_random_template()
+        if not self.templates:
+            raise ValueError("No templates available for preview.")
+        selected_template = self.templates[0]
         rendered_template = self._render_template(
             selected_template,
             company_name,
@@ -335,10 +353,6 @@ class EmailPreview:
     def _load_templates(self) -> list[TemplateRecord]:
         """Load all email templates from the SQLite application store."""
         return self.template_store.load_templates()
-
-    def _get_random_template(self) -> TemplateRecord:
-        """Randomly select a template from available templates."""
-        return random.choice(self.templates)
 
     def _render_template(
         self,
@@ -388,22 +402,20 @@ class EmailPreview:
             company_name: Name of the company
             to_email: Recipient email address
             template_number: Specific template ID to use.
-                           If None, randomly selects a template.
             **template_vars: Variables for template substitution
 
         Returns:
             Dict with subject, body, preview text, and template number used
         """
-        # Select specific template or random one
-        if template_number is not None:
-            selected_template = next(
-                (template for template in self.templates if template.id == template_number),
-                None,
-            )
-            if selected_template is None:
-                raise ValueError(f"Template {template_number} does not exist")
-        else:
-            selected_template = self._get_random_template()
+        if template_number is None:
+            raise ValueError("No template selected. Choose a template ID for preview.")
+
+        selected_template = next(
+            (template for template in self.templates if template.id == template_number),
+            None,
+        )
+        if selected_template is None:
+            raise ValueError(f"Template {template_number} does not exist")
 
         rendered_template = self._render_template(
             selected_template,

@@ -20,8 +20,8 @@ class TemplateRecord:
     id: int
     name: str
     subject: str
-    text_body_path: str
-    html_body_path: str
+    text_file: str
+    html_file: str
     text_body: str
     html_body: str
 
@@ -73,6 +73,8 @@ class DataStore:
 class TemplateStore(DataStore):
     """Handles email template storage and validation."""
 
+    _TEMPLATE_PREFIX = Path("templates")
+
     def __init__(self, db_path: Optional[str] = None):
         """Initialize the template store.
         
@@ -93,13 +95,43 @@ class TemplateStore(DataStore):
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
                     subject TEXT NOT NULL,
-                    text_body_path TEXT NOT NULL,
-                    html_body_path TEXT NOT NULL
+                    text_file TEXT NOT NULL,
+                    html_file TEXT NOT NULL
                 )
                 """
             )
 
         self.register_schema("templates", init_templates_table)
+
+
+    def _normalize_db_template_path(self, path_value: str, field_name: str) -> str:
+        """Normalize a database path to be relative to the templates directory."""
+        path = Path(path_value)
+
+        if path.is_absolute():
+            try:
+                path = path.resolve().relative_to(TEMPLATE_DIR.resolve())
+            except ValueError as error:
+                raise ValueError(
+                    f"Template {field_name} must point inside {TEMPLATE_DIR}: {path_value}"
+                ) from error
+        elif path.parts and path.parts[0] == self._TEMPLATE_PREFIX.name:
+            path = Path(*path.parts[1:])
+
+        normalized_path = path.as_posix()
+        if not normalized_path or normalized_path == ".":
+            raise ValueError(f"Template {field_name} cannot be empty: {path_value}")
+        if normalized_path.startswith("../") or normalized_path == "..":
+            raise ValueError(
+                f"Template {field_name} must stay inside {TEMPLATE_DIR}: {path_value}"
+            )
+
+        return normalized_path
+
+    def _template_db_value_to_path(self, path_value: str, field_name: str) -> Path:
+        """Convert a stored database value into a templates/ relative path."""
+        normalized_path = self._normalize_db_template_path(path_value, field_name)
+        return self._TEMPLATE_PREFIX / normalized_path
 
     def _resolve_template_path(self, path_value: str, field_name: str) -> Path:
         """Resolve and validate a template file path.
@@ -114,9 +146,7 @@ class TemplateStore(DataStore):
         Raises:
             ValueError: If the path is invalid or doesn't exist
         """
-        path = Path(path_value)
-        if not path.is_absolute():
-            path = BASE_DIR / path
+        path = BASE_DIR / self._template_db_value_to_path(path_value, field_name)
 
         resolved_path = path.resolve()
         template_root = TEMPLATE_DIR.resolve()
@@ -147,7 +177,7 @@ class TemplateStore(DataStore):
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT id, name, subject, text_body_path, html_body_path
+                SELECT id, name, subject, text_file, html_file
                 FROM templates
                 ORDER BY id
                 """
@@ -159,17 +189,19 @@ class TemplateStore(DataStore):
             )
 
         templates = []
-        for template_id, name, subject, text_body_path, html_body_path in rows:
-            resolved_text_path = self._resolve_template_path(text_body_path, "text_body_path")
-            resolved_html_path = self._resolve_template_path(html_body_path, "html_body_path")
+        for template_id, name, subject, text_file, html_file in rows:
+            resolved_text_path = self._resolve_template_path(text_file, "text_file")
+            resolved_html_path = self._resolve_template_path(html_file, "html_file")
+            rendered_text_file = self._template_db_value_to_path(text_file, "text_file").as_posix()
+            rendered_html_file = self._template_db_value_to_path(html_file, "html_file").as_posix()
 
             templates.append(
                 TemplateRecord(
                     id=template_id,
                     name=name,
                     subject=subject,
-                    text_body_path=text_body_path,
-                    html_body_path=html_body_path,
+                    text_file=rendered_text_file,
+                    html_file=rendered_html_file,
                     text_body=resolved_text_path.read_text(encoding="utf-8").strip(),
                     html_body=resolved_html_path.read_text(encoding="utf-8").strip(),
                 )

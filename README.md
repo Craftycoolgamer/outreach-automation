@@ -114,15 +114,15 @@ The system uses SMTP to send emails, which works with any email provider.
 
 ### 6. Template Database
 
-Email templates are now stored in the SQLite application database at `outreach.db`.
+Email templates are now stored in the SQLite application database at `db.db`.
 
 The `templates` table stores:
 - `name`
 - `subject`
-- `text_body_path` - path to a `.txt` file in `templates/`
-- `html_body_path` - path to a `.html` file in `templates/`
+- `text_file` - relative path to a `.txt` file under `templates/`
+- `html_file` - relative path to a `.html` file under `templates/`
 
-Both linked files must exist inside `templates/` or the email client will raise an error during startup.
+The application automatically prefixes `templates/` when loading these paths. Both linked files must exist inside `templates/` or the email client will raise an error during startup.
 
 ## Usage
 
@@ -213,8 +213,8 @@ CREATE TABLE templates (
    id INTEGER PRIMARY KEY AUTOINCREMENT,
    name TEXT NOT NULL UNIQUE,
    subject TEXT NOT NULL,
-   text_body_path TEXT NOT NULL,
-   html_body_path TEXT NOT NULL
+   text_file TEXT NOT NULL,
+   html_file TEXT NOT NULL
 );
 ```
 

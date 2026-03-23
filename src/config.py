@@ -77,13 +77,26 @@ EXCLUDED_EMAIL_PATTERNS = [
 EMAIL_PRIORITY_KEYWORDS = [
     "partnership",
     "partnerships",
+    "partner",
     "info",
     "hello",
     "contact",
-    "sales",
     "business",
+    "sales",
     "support",
     "service",
+]
+
+# Priority keywords for contact form selection
+FORM_PRIORITY_KEYWORDS = [
+    "partnership",
+    "partnerships",
+    "partner",
+    "partners",
+    "collaboration",
+    "collaborate",
+    "alliance",
+    "alliances",
 ]
 
 # Sheet column names (6-column format)
