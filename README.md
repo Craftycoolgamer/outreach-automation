@@ -218,6 +218,12 @@ CREATE TABLE templates (
 );
 ```
 
+Example command to add a template row:
+
+```bash
+sqlite3 db.db "INSERT INTO templates (name, subject, text_file, html_file) VALUES ('Template 1', 'Subject for the Template', 'template1.txt', 'template1.html');"
+```
+
 Example text body file:
 
 ```
