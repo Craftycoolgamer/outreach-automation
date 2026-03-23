@@ -132,19 +132,6 @@ class OutreachWorkflow:
         """Interactive prompt for email outreach decision."""
         email = result["best_email"]
 
-        # Use a deterministic preview template in this menu.
-        template_id = self.preview.templates[0].id if self.preview.templates else None
-        preview = self.preview.generate_preview(
-            company,
-            email,
-            template_number=template_id,
-            sender_name=SENDER_NAME,
-            sender_title=SENDER_TITLE,
-            sender_company=SENDER_COMPANY,
-            sender_phone=SENDER_PHONE,
-        )
-        print("\n" + preview["preview"])
-
         print("\nOptions:")
         print("  [s] Send now (requires SMTP config)")
         print("  [r] Mark as ready to send (review later) ← Recommended")
@@ -272,7 +259,6 @@ class OutreachWorkflow:
                 return None, None
 
             template_vars = self._collect_required_template_vars(selected_template, company)
-            print("\n\ntemplate_vars:", template_vars, "\n\n")
             template_vars.pop("company_name", None)
             template_vars.pop("to_email", None)
             preview = self.preview.generate_preview(

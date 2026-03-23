@@ -69,11 +69,11 @@ class SmtpOutreach:
         """Render the selected template with placeholder substitution."""
         defaults = {
             "company_name": company_name,
-            "sender_name": template_vars.get("sender_name", "Your Name"),
-            "sender_title": template_vars.get("sender_title", "Your Title"),
-            "sender_company": template_vars.get("sender_company", "Your Company"),
-            "sender_phone": template_vars.get("sender_phone", ""),
-            "industry": template_vars.get("industry", "your industry"),
+            "sender_name": template_vars.get("sender_name") or "Your Name",
+            "sender_title": template_vars.get("sender_title") or "Your Title",
+            "sender_company": template_vars.get("sender_company") or "Your Company",
+            "sender_phone": template_vars.get("sender_phone") or "",
+            "industry": template_vars.get("industry") or "your industry",
         }
         defaults.update(template_vars)
 
@@ -297,50 +297,6 @@ class SmtpOutreach:
             }]
 
         return results
-
-    def preview_random_template(
-        self,
-        company_name: str,
-        to_email: str,
-        **template_vars,
-    ) -> dict:
-        """Generate a preview for a selected template.
-        
-        Returns:
-            Dict with subject, body, preview text, and template number used
-        """
-        if not self.templates:
-            raise ValueError("No templates available for preview.")
-        selected_template = self.templates[0]
-        rendered_template = self._render_template(
-            selected_template,
-            company_name,
-            **template_vars,
-        )
-
-        preview = f"""
-{'=' * 60}
-TEMPLATE #{selected_template.id}: {selected_template.name}
-FROM: {EMAIL_USER}
-TO: {to_email}
-SUBJECT: {rendered_template.subject}
-{'=' * 60}
-
-{rendered_template.text_body}
-
-{'=' * 60}
-"""
-
-        return {
-            "subject": rendered_template.subject,
-            "body": rendered_template.text_body,
-            "html_body": rendered_template.html_body,
-            "preview": preview,
-            "company": company_name,
-            "to": to_email,
-            "template_number": selected_template.id,
-            "template_name": selected_template.name,
-        }
 
 
 class EmailPreview:

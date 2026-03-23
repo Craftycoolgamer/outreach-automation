@@ -51,6 +51,7 @@ CONTACT_PATHS = [
     "/sales",
     "/get-in-touch",
     "/reach-out",
+    "/request-a-demo",
 ]
 
 # Email patterns to extract

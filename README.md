@@ -110,7 +110,20 @@ The system uses SMTP to send emails, which works with any email provider.
 2. Click **Share** button
 3. Add the service account email (ends with `@...gserviceaccount.com`) as **Editor**
 4. Copy the Sheet ID from the URL (the long string between `/d/` and `/edit`)
-5. Add it to your `.env` file
+5. Add the Sheet ID to your `.env` file:
+```
+GOOGLE_SHEET_ID=your_sheet_id_here
+```
+
+### 6. Set Up Email Templates
+
+The application automatically prefixes `templates/` when loading these paths.
+
+> Important: The `templates/` directory is **not** tracked in version control and will be empty (or missing) in a fresh clone. Before running the application, you **must** create a local `templates/` directory and add the `.txt` and `.html` files referenced by `text_file` and `html_file` in the `templates` table. If any referenced file is missing under `templates/`, template loading (e.g., `TemplateStore.load_templates()`) will fail during startup.
+
+### 7. Template Database
+
+Email templates are stored in the SQLite application database at `db.db`.
 
 ### 6. Template Database
 
@@ -221,7 +234,7 @@ CREATE TABLE templates (
 Example command to add a template row:
 
 ```bash
-sqlite3 db.db "INSERT INTO templates (name, subject, text_file, html_file) VALUES ('Template 1', 'Subject for the Template', 'template1.txt', 'template1.html');"
+sqlite3 db.db "INSERT INTO templates (name, subject, text_file, html_file) VALUES ('Partner Team', 'Integration Opportunity', 'partner_team.txt', 'partner_team.html');"
 ```
 
 Example text body file:
@@ -256,7 +269,7 @@ outreach-automation/
 ├── templates/
 │   ├── outreach_template_nickd.txt
 │   └── outreach_template_nickd.html
-├── outreach.db            # SQLite application database
+├── db.db            # SQLite application database
 ├── .env                   # Your environment variables (not in git)
 ├── .env.example           # Example environment file
 ├── credentials.json       # Google Sheets service account key
