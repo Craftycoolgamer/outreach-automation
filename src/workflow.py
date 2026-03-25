@@ -1,6 +1,7 @@
 """Main workflow orchestrator for outreach automation."""
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from typing import Optional
@@ -31,6 +32,7 @@ from config import (
 from sheets import OutreachSheet
 from scraper import CompanyResearcher, format_research_result
 from email_client import SmtpOutreach, EmailPreview
+from template_store import TemplateRecord
 
 
 class OutreachWorkflow:
@@ -55,12 +57,13 @@ class OutreachWorkflow:
                 print(f"Warning: Email not configured. {e}")
                 print("To enable: Add EMAIL_USER, EMAIL_PASSWORD, and SMTP_SERVER to .env")
 
-    def research_pending(self, auto_approve: bool = False):
+    def research_pending(self, auto_approve: bool = False, limit: Optional[int] = None):
         """Research all companies with 'new' status.
 
         Args:
             auto_approve: If True, mark emails as ready_to_send without review
                          (not recommended for production)
+            limit: Maximum number of companies to process. If None, process all.
         """
         pending = self.sheet.get_pending_research()
 
@@ -68,7 +71,15 @@ class OutreachWorkflow:
             print("No companies pending research.")
             return
 
-        print(f"Found {len(pending)} companies to research\n")
+        total_pending = len(pending)
+        if limit is not None:
+            pending = pending[:limit]
+
+        print(f"Found {total_pending} companies to research")
+        if limit is not None:
+            print(f"Processing {len(pending)} compan{'ies' if len(pending) != 1 else 'y'}\n")
+        else:
+            print()
 
         for row_idx, row in pending:
             company = row.get(COLUMN_COMPANY, "")
@@ -121,17 +132,6 @@ class OutreachWorkflow:
         """Interactive prompt for email outreach decision."""
         email = result["best_email"]
 
-        # Generate preview with sender information
-        preview = self.preview.generate_preview(
-            company,
-            email,
-            sender_name=SENDER_NAME,
-            sender_title=SENDER_TITLE,
-            sender_company=SENDER_COMPANY,
-            sender_phone=SENDER_PHONE,
-        )
-        print("\n" + preview["preview"])
-
         print("\nOptions:")
         print("  [s] Send now (requires SMTP config)")
         print("  [r] Mark as ready to send (review later) ← Recommended")
@@ -141,7 +141,7 @@ class OutreachWorkflow:
         choice = input("\nChoice [r]: ").strip().lower() or "r"
 
         if choice == "s":
-            self._update_for_email(row_idx, email, auto_send=True)
+            self._send_email_interactive(row_idx=row_idx, company=company, email=email)
         elif choice == "r":
             self._update_for_email(row_idx, email, auto_send=False)
         elif choice == "f":
@@ -175,34 +175,151 @@ class OutreachWorkflow:
 
     def _update_for_email(self, row_idx: int, email: str, auto_send: bool = False):
         """Update sheet for email outreach."""
-        if auto_send and self.email_client and not self.dry_run:
-            # Send immediately
+        if auto_send:
             row = self.sheet.worksheet.row_values(row_idx)
-            company = row[1]  # Column B
-
-            result = self.email_client.send_email(
-                email,
-                company,
-                sender_name=SENDER_NAME,
-                sender_title=SENDER_TITLE,
-                sender_company=SENDER_COMPANY,
-                sender_phone=SENDER_PHONE,
-            )
-
-            if result["success"]:
-                self.sheet.mark_sent(row_idx, email)
-                print(f"Email sent successfully!")
-            else:
-                self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_FAILED)
-                print(f"Failed to send: {result['error']}")
+            company = row[1] if len(row) > 1 else ""
+            self._send_email_interactive(row_idx=row_idx, company=company, email=email)
         else:
             # Mark for later review
             self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_READY_TO_SEND)
             print(f"{self.sheet.worksheet.row_values(row_idx)[1]} - Marked as ready to send to: {email}")
 
+    def _build_template_vars(self, company: str) -> dict:
+        """Build template vars using configured defaults and company context."""
+        return {
+            "company_name": company,
+            "sender_name": SENDER_NAME or "",
+            "sender_title": SENDER_TITLE or "",
+            "sender_company": SENDER_COMPANY or "",
+            "sender_phone": SENDER_PHONE or "",
+        }
+
+    def _extract_placeholders(self, template: TemplateRecord) -> set[str]:
+        """Extract placeholder names from subject/text/html template content."""
+        pattern = r"\{\{([a-zA-Z0-9_]+)\}\}"
+        content = f"{template.subject}\n{template.text_body}\n{template.html_body}"
+        return set(re.findall(pattern, content))
+
+    def _choose_template_interactive(self) -> Optional[TemplateRecord]:
+        """Prompt user to select a template from available templates."""
+        templates = self.preview.get_templates()
+        if not templates:
+            print("No templates available.")
+            return None
+
+        while True:
+            print("\nChoose template to send:")
+            for template in templates:
+                print(f"  [{template.id}] {template.name}")
+            print("  [x] Cancel send")
+
+            default_template_id = str(templates[0].id)
+            choice = input(f"\nTemplate ID [{default_template_id}]: ").strip().lower() or default_template_id
+            if choice == "x":
+                return None
+            if choice.isdigit():
+                selected_template_id = int(choice)
+                selected_template = next(
+                    (template for template in templates if template.id == selected_template_id),
+                    None,
+                )
+                if selected_template is not None:
+                    return selected_template
+            print("Invalid selection. Please choose a valid template ID.")
+
+    def _collect_required_template_vars(self, template: TemplateRecord, company: str) -> dict:
+        """Prompt until all placeholders required by the selected template are set."""
+        template_vars = self._build_template_vars(company)
+        required_placeholders = self._extract_placeholders(template)
+
+        # company_name is always set from sheet context.
+        required_placeholders.discard("company_name")
+
+        while True:
+            missing = [
+                name for name in sorted(required_placeholders)
+                if not str(template_vars.get(name, "")).strip()
+            ]
+            if not missing:
+                return template_vars
+
+            print("\nMissing template parameters:")
+            for name in missing:
+                value = input(f"  Enter value for {name}: ").strip()
+                if value:
+                    template_vars[name] = value
+
+            remaining = [
+                name for name in sorted(required_placeholders)
+                if not str(template_vars.get(name, "")).strip()
+            ]
+            if remaining:
+                print("Some required parameters are still missing. Please provide them before sending.")
+
+    def _prompt_template_for_send(self, company: str, email: str) -> tuple[Optional[TemplateRecord], Optional[dict]]:
+        """Select a template and gather required variables with confirmation."""
+        while True:
+            selected_template = self._choose_template_interactive()
+            if selected_template is None:
+                return None, None
+
+            template_vars = self._collect_required_template_vars(selected_template, company)
+            template_vars.pop("company_name", None)
+            template_vars.pop("to_email", None)
+            preview = self.preview.generate_preview(
+                company,
+                email,
+                template_id=selected_template.id,
+                **template_vars,
+            )
+
+            print("\n" + preview["preview"])
+            confirm = input("Send with this template? [y/n]: ").strip().lower() or "y"
+            if confirm == "y":
+                return selected_template, template_vars
+
+            print("Let's choose again.")
+
+    def _send_email_interactive(self, row_idx: int, company: str, email: str):
+        """Send one email after explicit template selection and var validation."""
+        if not self.email_client or self.dry_run:
+            self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_READY_TO_SEND)
+            print("Email sending is disabled. Marked as ready to send.")
+            return
+
+        selected_template, template_vars = self._prompt_template_for_send(company, email)
+        if selected_template is None:
+            self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_READY_TO_SEND)
+            print("Send cancelled. Marked as ready to send.")
+            return
+
+        result = self.email_client.send_email(
+            email,
+            company,
+            template=selected_template,
+            **template_vars,
+        )
+
+        if result["success"]:
+            self.sheet.mark_sent(row_idx, email)
+            print("Email sent successfully!")
+        else:
+            self.sheet.update_row(row_idx, email, METHOD_EMAIL, STATUS_FAILED)
+            print(f"Failed to send: {result['error']}")
+
     def _save_draft_local(self, row_idx: int, company: str, email: str):
         """Save email draft locally for review."""
-        preview = self.preview.generate_preview(company, email)
+        templates = self.preview.get_templates()
+        if not templates:
+            print("No templates available. Cannot create draft preview.")
+            return
+
+        preview = self.preview.generate_preview(
+            company,
+            email,
+            template_id=templates[0].id,
+            **self._build_template_vars(company),
+        )
         draft_file = f"draft_{company.replace(' ', '_').lower()}.txt"
 
         with open(draft_file, "w") as f:
@@ -251,6 +368,19 @@ class OutreachWorkflow:
 
         print(f"Found {len(ready)} email(s) ready to send (limit: {limit})\n")
 
+        selected_template: Optional[TemplateRecord] = None
+        template_vars: dict = {}
+        if not self.dry_run:
+            first_company = ready[0][1].get(COLUMN_COMPANY, "")
+            first_email = ready[0][1].get(COLUMN_CONTACT, "")
+            selected_template, template_vars = self._prompt_template_for_send(
+                first_company,
+                first_email,
+            )
+            if selected_template is None:
+                print("Cancelled batch send.")
+                return
+
         sent_count = 0
         for row_idx, row in ready[:limit]:
             if sent_count >= limit:
@@ -270,10 +400,8 @@ class OutreachWorkflow:
             result = self.email_client.send_email(
                 email,
                 company,
-                sender_name=SENDER_NAME,
-                sender_title=SENDER_TITLE,
-                sender_company=SENDER_COMPANY,
-                sender_phone=SENDER_PHONE,
+                template=selected_template,
+                **template_vars,
             )
 
             if result["success"]:
@@ -382,6 +510,7 @@ def main():
         epilog="""
 Examples:
   python workflow.py --research              # Research all pending companies
+  python workflow.py --research-one          # Research only one pending company
   python workflow.py --research --auto       # Auto-approve findings + batch confirm before sending
   python workflow.py --send                  # Send approved emails
   python workflow.py --status                # Show status summary
@@ -393,6 +522,8 @@ Examples:
 
     parser.add_argument("--research", action="store_true",
                         help="Research all companies with 'new' status")
+    parser.add_argument("--research-one", action="store_true",
+                        help="Research only the next company with 'new' status")
     parser.add_argument("--auto", action="store_true",
                         help="Auto-approve research findings (use with --research)")
     parser.add_argument("--send", action="store_true",
@@ -418,6 +549,10 @@ Examples:
 
     workflow = OutreachWorkflow(dry_run=args.dry_run)
 
+    if args.research and args.research_one:
+        print("Use either --research or --research-one, not both.")
+        return
+
     if args.research and args.auto:
         workflow.research_pending(auto_approve=True)
         if workflow.display_ready_to_send(limit=args.limit):
@@ -426,8 +561,18 @@ Examples:
                 workflow.send_approved_emails(limit=args.limit)
             else:
                 print("Cancelled. Emails marked as ready but not sent.")
+    elif args.research_one and args.auto:
+        workflow.research_pending(auto_approve=True, limit=1)
+        if workflow.display_ready_to_send(limit=args.limit):
+            confirm = input("\nConfirm sending these emails? (y/n): ").strip().lower()
+            if confirm == "y":
+                workflow.send_approved_emails(limit=args.limit)
+            else:
+                print("Cancelled. Emails marked as ready but not sent.")
     elif args.research:
         workflow.research_pending(auto_approve=False)
+    elif args.research_one:
+        workflow.research_pending(auto_approve=False, limit=1)
 
     if args.send and not (args.research and args.auto):
         workflow.send_approved_emails(limit=args.limit)

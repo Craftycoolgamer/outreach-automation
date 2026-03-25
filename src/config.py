@@ -25,14 +25,10 @@ SENDER_PHONE = os.getenv("SENDER_PHONE")
 
 # Template directory
 TEMPLATE_DIR = BASE_DIR / "templates"
+DATABASE_PATH = BASE_DIR / "db.db"
 
 # Outreach limits
 DAILY_EMAIL_LIMIT = int(os.getenv("DAILY_EMAIL_LIMIT", "50"))
-
-# Email templates (randomly selected when sending)
-EMAIL_TEMPLATES = sorted(
-    str(p) for p in TEMPLATE_DIR.glob("*template*.txt")
-)
 
 # Scraping
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "10"))
@@ -55,6 +51,8 @@ CONTACT_PATHS = [
     "/sales",
     "/get-in-touch",
     "/reach-out",
+    "/request-a-demo",
+    "/demo-request",
 ]
 
 # Email patterns to extract
@@ -81,13 +79,26 @@ EXCLUDED_EMAIL_PATTERNS = [
 EMAIL_PRIORITY_KEYWORDS = [
     "partnership",
     "partnerships",
+    "partner",
     "info",
     "hello",
     "contact",
-    "sales",
     "business",
+    "sales",
     "support",
     "service",
+]
+
+# Priority keywords for contact form selection
+FORM_PRIORITY_KEYWORDS = [
+    "partnership",
+    "partnerships",
+    "partner",
+    "partners",
+    "collaboration",
+    "collaborate",
+    "alliance",
+    "alliances",
 ]
 
 # Sheet column names (6-column format)
@@ -111,6 +122,27 @@ STATUS_FAILED = "Failed"
 # Maximum number of workers for parallel processing
 SCRAPER_MAX_WORKERS = 8
 
+# External iframe form scraping guardrails
+# These are common third-party form providers. Only these host suffixes
+# are eligible for external iframe fetches.
+EXTERNAL_FORM_IFRAME_PROVIDER_ALLOWLIST = [
+    "hsforms.com",        # HubSpot forms
+    "hubspot.com",        # HubSpot hosted endpoints
+    "typeform.com",       # Typeform
+    "jotform.com",        # Jotform
+    "formstack.com",      # Formstack
+    "wufoo.com",          # Wufoo
+    "cognitoforms.com",   # Cognito Forms
+    "paperform.co",       # Paperform
+    "formsite.com",       # Formsite
+    "docs.google.com",    # Google Forms
+]
+
+MAX_IFRAMES_PER_PAGE = int(os.getenv("MAX_IFRAMES_PER_PAGE", "5"))
+MAX_EXTERNAL_IFRAMES_PER_PAGE = int(os.getenv("MAX_EXTERNAL_IFRAMES_PER_PAGE", "2"))
+MAX_EXTERNAL_IFRAME_REDIRECTS = int(os.getenv("MAX_EXTERNAL_IFRAME_REDIRECTS", "1"))
+MAX_EXTERNAL_IFRAME_BYTES = int(os.getenv("MAX_EXTERNAL_IFRAME_BYTES", "1500000"))
+
 # Method values
 METHOD_EMAIL = "Email"
 METHOD_CONTACT_FORM = "Forum"
@@ -133,4 +165,5 @@ VALID_METHODS = [
     METHOD_EMAIL,
     METHOD_CONTACT_FORM,
     METHOD_MANUAL,
+    METHOD_MISSING
 ]

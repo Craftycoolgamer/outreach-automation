@@ -21,6 +21,7 @@ from config import (
     EMAIL_PATTERNS,
     EXCLUDED_EMAIL_PATTERNS,
     EMAIL_PRIORITY_KEYWORDS,
+    FORM_PRIORITY_KEYWORDS,
     SCRAPER_MAX_WORKERS,
 )
 
@@ -221,6 +222,20 @@ class CompanyResearcher:
 
         return emails
 
+    def _is_same_domain(self, base_url: str, candidate_url: str) -> bool:
+        """Return True when candidate_url stays on the same domain or subdomain."""
+        base_host = (urlparse(base_url).netloc or "").replace("www.", "").lower()
+        candidate_host = (urlparse(candidate_url).netloc or "").replace("www.", "").lower()
+
+        if not base_host or not candidate_host:
+            return False
+
+        return (
+            base_host == candidate_host
+            or base_host.endswith(f".{candidate_host}")
+            or candidate_host.endswith(f".{base_host}")
+        )
+
     def _find_contact_forms(self, soup: BeautifulSoup, base_url: str) -> list[str]:
         """Find contact form URLs on the page."""
         forms = []
@@ -244,7 +259,8 @@ class CompanyResearcher:
 
             if is_contact:
                 action_url = urljoin(base_url, form_action) if form_action else base_url
-                forms.append(action_url)
+                if self._is_same_domain(base_url, action_url):
+                    forms.append(action_url)
 
         # Also look for links to contact pages
         for link in soup.find_all("a", href=True):
@@ -253,7 +269,7 @@ class CompanyResearcher:
 
             if any(path in href for path in CONTACT_PATHS):
                 full_url = urljoin(base_url, href)
-                if full_url not in forms:
+                if self._is_same_domain(base_url, full_url) and full_url not in forms:
                     forms.append(full_url)
 
         return forms
@@ -349,7 +365,7 @@ class CompanyResearcher:
 
         # Determine best contact method
         best_email = self._select_best_email(unique_emails, domain)
-        best_form = unique_forms[0] if unique_forms else None
+        best_form = self._select_best_form(unique_forms, base_url)
 
         return {
             "company_name": company_name,
@@ -381,6 +397,25 @@ class CompanyResearcher:
                     return email
 
         return emails[0]
+
+    def _select_best_form(self, forms: list[str], base_url: str) -> Optional[str]:
+        """Select the best form URL based on domain and priority keywords."""
+        if not forms:
+            return None
+
+        same_domain_forms = [form for form in forms if self._is_same_domain(base_url, form)]
+        if same_domain_forms:
+            forms = same_domain_forms
+        else:
+            return None
+
+        lowered_forms = [(form, form.lower()) for form in forms]
+        for keyword in FORM_PRIORITY_KEYWORDS:
+            for form, lowered_form in lowered_forms:
+                if keyword in lowered_form:
+                    return form
+
+        return forms[0]
 
 
 def format_research_result(result: dict) -> str:

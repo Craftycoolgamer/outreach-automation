@@ -110,7 +110,32 @@ The system uses SMTP to send emails, which works with any email provider.
 2. Click **Share** button
 3. Add the service account email (ends with `@...gserviceaccount.com`) as **Editor**
 4. Copy the Sheet ID from the URL (the long string between `/d/` and `/edit`)
-5. Add it to your `.env` file
+5. Add the Sheet ID to your `.env` file:
+```
+GOOGLE_SHEET_ID=your_sheet_id_here
+```
+
+### 6. Set Up Email Templates
+
+The application automatically prefixes `templates/` when loading these paths.
+
+> Important: The `templates/` directory is **not** tracked in version control and will be empty (or missing) in a fresh clone. Before running the application, you **must** create a local `templates/` directory and add the `.txt` and `.html` files referenced by `text_file` and `html_file` in the `templates` table. If any referenced file is missing under `templates/`, template loading (e.g., `TemplateStore.load_templates()`) will fail during startup.
+
+### 7. Template Database
+
+Email templates are stored in the SQLite application database at `db.db`.
+
+### 6. Template Database
+
+Email templates are now stored in the SQLite application database at `db.db`.
+
+The `templates` table stores:
+- `name`
+- `subject`
+- `text_file` - relative path to a `.txt` file under `templates/`
+- `html_file` - relative path to a `.html` file under `templates/`
+
+The application automatically prefixes `templates/` when loading these paths. Both linked files must exist inside `templates/` or the email client will raise an error during startup.
 
 ## Usage
 
@@ -192,11 +217,29 @@ python3 src/workflow.py --status
 
 ## Customizing Email Templates
 
-Edit `templates/outreach_template.txt`:
+Update the linked body files in `templates/` and the matching row in `db.db`.
+
+Example schema:
+
+```sql
+CREATE TABLE templates (
+   id INTEGER PRIMARY KEY AUTOINCREMENT,
+   name TEXT NOT NULL UNIQUE,
+   subject TEXT NOT NULL,
+   text_file TEXT NOT NULL,
+   html_file TEXT NOT NULL
+);
+```
+
+Example command to add a template row:
+
+```bash
+sqlite3 db.db "INSERT INTO templates (name, subject, text_file, html_file) VALUES ('Partner Team', 'Integration Opportunity', 'partner_team.txt', 'partner_team.html');"
+```
+
+Example text body file:
 
 ```
-Subject: Partnership Opportunity with {{company_name}}
-
 Hi {{company_name}} Team,
 
 Your custom message here...
@@ -224,7 +267,9 @@ outreach-automation/
 │   ├── email_client.py    # SMTP email client
 │   └── workflow.py        # Main workflow orchestrator
 ├── templates/
-│   └── outreach_template.txt
+│   ├── outreach_template_nickd.txt
+│   └── outreach_template_nickd.html
+├── db.db            # SQLite application database
 ├── .env                   # Your environment variables (not in git)
 ├── .env.example           # Example environment file
 ├── credentials.json       # Google Sheets service account key

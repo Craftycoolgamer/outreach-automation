@@ -1,36 +1,43 @@
 """SMTP email client for sending outreach emails."""
 
-import os
-import random
 import smtplib
 import ssl
+from dataclasses import dataclass
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from pathlib import Path
 from typing import Optional
+from html import escape
 
 from config import (
     EMAIL_USER,
     EMAIL_PASSWORD,
     SMTP_SERVER,
     SMTP_PORT,
-    EMAIL_TEMPLATES,
-    BASE_DIR,
 )
+from template_store import TemplateRecord, TemplateStore
+
+
+@dataclass(frozen=True)
+class RenderedTemplate:
+    """Rendered template bodies ready for transport or preview."""
+
+    template: TemplateRecord
+    subject: str
+    text_body: str
+    html_body: str
 
 
 class SmtpOutreach:
-    """Sends outreach emails via SMTP with random template selection."""
+    """Sends outreach emails via SMTP with explicit template selection."""
 
-    def __init__(self, template_paths: Optional[list[str]] = None):
+    def __init__(self, db_path: Optional[str] = None):
         """Initialize SMTP client.
 
         Args:
-            template_paths: List of paths to email template files.
-                          If None, uses EMAIL_TEMPLATES from config.
+            db_path: Optional path to the SQLite application database.
         """
-        self.template_paths = template_paths or EMAIL_TEMPLATES
-        self.templates = self._load_templates()
+        self.template_store = TemplateStore(db_path)
+        self.template_store.get_templates()
         self._validate_config()
 
     def _validate_config(self):
@@ -49,44 +56,45 @@ class SmtpOutreach:
                 "Please check your .env file."
             )
 
-    def _load_templates(self) -> list[str]:
-        """Load all email templates from files."""
-        templates = []
-        for template_path in self.template_paths:
-            path = Path(template_path)
-            if path.exists():
-                templates.append(path.read_text())
-        
-        # If no templates loaded, use default
-        if not templates:
-            templates = [self._default_template()]
-        
-        return templates
+    def _render_template(
+        self,
+        template: TemplateRecord,
+        company_name: str,
+        **template_vars,
+    ) -> RenderedTemplate:
+        """Render the selected template with placeholder substitution."""
+        defaults = {
+            "company_name": company_name,
+            "sender_name": template_vars.get("sender_name") or "Your Name",
+            "sender_title": template_vars.get("sender_title") or "Your Title",
+            "sender_company": template_vars.get("sender_company") or "Your Company",
+            "sender_phone": template_vars.get("sender_phone") or "",
+            "industry": template_vars.get("industry") or "your industry",
+        }
+        defaults.update(template_vars)
 
-    def _get_random_template(self) -> str:
-        """Randomly select a template from available templates."""
-        return random.choice(self.templates)
+        subject = template.subject
+        text_body = template.text_body
+        html_body = template.html_body
 
-    def _default_template(self) -> str:
-        """Default outreach email template."""
-        return """Subject: Partnership Opportunity with {{company_name}}
+        for key, value in defaults.items():
+            placeholder = f"{{{{{key}}}}}"
+            replacement = str(value)
+            subject = subject.replace(placeholder, replacement)
+            text_body = text_body.replace(placeholder, replacement)
+            html_body = html_body.replace(placeholder, replacement)
 
-Hi {{company_name}} Team,
+        return RenderedTemplate(
+            template=template,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+        )
 
-I hope this message finds you well. I'm reaching out from {{sender_company}} to explore a potential partnership opportunity.
-
-After reviewing {{company_name}}'s work in {{industry}}, I believe there could be valuable synergies between our organizations.
-
-Would you be open to a brief conversation to explore how we might collaborate?
-
-Looking forward to hearing from you.
-
-Best regards,
-{{sender_name}}
-{{sender_title}}
-{{sender_company}}
-{{sender_phone}}
-"""
+    def _plain_to_html(self, body: str) -> str:
+        """Create a basic HTML fallback from plain text."""
+        escaped_body = escape(body).replace("\n", "<br>\n")
+        return f"<html><body><p>{escaped_body}</p></body></html>"
 
     def _prepare_message(
         self,
@@ -94,40 +102,28 @@ Best regards,
         company_name: str,
         subject: Optional[str] = None,
         body: Optional[str] = None,
-        template: Optional[str] = None,
+        html_body: Optional[str] = None,
+        template: Optional[TemplateRecord] = None,
         **template_vars,
     ) -> MIMEMultipart:
         """Prepare email message with template substitution."""
-        if subject is None or body is None:
-            # Use provided template or pick a random one
-            email_text = template or self._get_random_template()
+        if subject is None or body is None or html_body is None:
+            if template is None:
+                raise ValueError(
+                    "No template selected. Choose a template before sending."
+                )
+            selected_template = template
+            rendered_template = self._render_template(
+                selected_template,
+                company_name,
+                **template_vars,
+            )
+            subject = subject or rendered_template.subject
+            body = body or rendered_template.text_body
+            html_body = html_body or rendered_template.html_body
 
-            defaults = {
-                "company_name": company_name,
-                "sender_name": template_vars.get("sender_name", "Your Name"),
-                "sender_title": template_vars.get("sender_title", "Your Title"),
-                "sender_company": template_vars.get("sender_company", "Your Company"),
-                "sender_phone": template_vars.get("sender_phone", ""),
-                "industry": template_vars.get("industry", "your industry"),
-            }
-            defaults.update(template_vars)
-
-            lines = email_text.strip().split("\n")
-            template_subject = "Partnership Opportunity"
-
-            if lines[0].startswith("Subject:"):
-                template_subject = lines[0].replace("Subject:", "").strip()
-                template_body = "\n".join(lines[1:]).strip()
-            else:
-                template_body = email_text
-
-            for key, value in defaults.items():
-                placeholder = f"{{{{{key}}}}}"
-                template_subject = template_subject.replace(placeholder, str(value))
-                template_body = template_body.replace(placeholder, str(value))
-
-            subject = subject or template_subject
-            body = body or template_body
+        if html_body is None:
+            html_body = self._plain_to_html(body)
 
         message = MIMEMultipart("alternative")
         message["Subject"] = subject
@@ -135,6 +131,7 @@ Best regards,
         message["To"] = to_email
 
         message.attach(MIMEText(body, "plain"))
+        message.attach(MIMEText(html_body, "html"))
 
         return message
 
@@ -144,7 +141,8 @@ Best regards,
         company_name: str,
         subject: Optional[str] = None,
         body: Optional[str] = None,
-        template: Optional[str] = None,
+        html_body: Optional[str] = None,
+        template: Optional[TemplateRecord] = None,
         **template_vars,
     ) -> dict:
         """Send an outreach email via SMTP.
@@ -154,17 +152,30 @@ Best regards,
             company_name: Name of the company (for logging)
             subject: Email subject (uses template if not provided)
             body: Email body (uses template if not provided)
-            template: Specific template to use (randomly selects if not provided)
+            template: Specific template to use (required unless full subject/body/html provided)
             **template_vars: Variables to substitute in template
 
         Returns:
             Dict with success status and template used
         """
-        # Select template if not provided
-        selected_template = template or self._get_random_template()
+        if template is None and (subject is None or body is None or html_body is None):
+            return {
+                "success": False,
+                "error": "No template selected. Choose a template before sending.",
+                "to": to_email,
+                "company": company_name,
+            }
+
+        selected_template = template
         
         message = self._prepare_message(
-            to_email, company_name, subject, body, selected_template, **template_vars
+            to_email,
+            company_name,
+            subject,
+            body,
+            html_body,
+            selected_template,
+            **template_vars,
         )
 
         try:
@@ -180,7 +191,7 @@ Best regards,
                 "to": to_email,
                 "company": company_name,
                 "from": EMAIL_USER,
-                "template_used": self.templates.index(selected_template) + 1 if selected_template in self.templates else None,
+                "template_used": selected_template.id if selected_template else None,
             }
 
         except smtplib.SMTPAuthenticationError as e:
@@ -235,14 +246,26 @@ Best regards,
 
                     to_email = recipient["email"]
                     company_name = recipient["company_name"]
-                    # Randomly select template for each email
-                    selected_template = self._get_random_template()
+                    selected_template = recipient.get("template")
+                    if selected_template is None and (
+                        recipient.get("subject") is None
+                        or recipient.get("body") is None
+                        or recipient.get("html_body") is None
+                    ):
+                        results.append({
+                            "success": False,
+                            "error": "No template selected. Choose a template before sending.",
+                            "to": to_email,
+                            "company": company_name,
+                        })
+                        continue
 
                     message = self._prepare_message(
                         to_email,
                         company_name,
                         recipient.get("subject"),
                         recipient.get("body"),
+                        recipient.get("html_body"),
                         selected_template,
                         **recipient.get("template_vars", {}),
                     )
@@ -253,7 +276,7 @@ Best regards,
                             "success": True,
                             "to": to_email,
                             "company": company_name,
-                            "template_used": self.templates.index(selected_template) + 1,
+                            "template_used": selected_template.id if selected_template else None,
                         })
                     except Exception as e:
                         results.append({
@@ -271,20 +294,28 @@ Best regards,
 
         return results
 
-    def preview_random_template(
+
+class EmailPreview:
+    """Preview emails without sending (for human review)."""
+
+    def __init__(self, db_path: Optional[str] = None):
+        self.template_store = TemplateStore(db_path)
+
+    def get_templates(self) -> list[TemplateRecord]:
+        """Load all email templates from the SQLite application store."""
+        return self.template_store.get_templates()
+
+    def get_template(self, template_id: int) -> TemplateRecord:
+        """Load one template by ID from the SQLite application store."""
+        return self.template_store.get_template(template_id)
+
+    def _render_template(
         self,
+        template: TemplateRecord,
         company_name: str,
-        to_email: str,
         **template_vars,
-    ) -> dict:
-        """Generate a preview using a randomly selected template.
-        
-        Returns:
-            Dict with subject, body, preview text, and template number used
-        """
-        selected_template = self._get_random_template()
-        template_num = self.templates.index(selected_template) + 1
-        
+    ) -> RenderedTemplate:
+        """Render the selected template with placeholder substitution."""
         defaults = {
             "company_name": company_name,
             "sender_name": template_vars.get("sender_name", "Your Name"),
@@ -295,93 +326,29 @@ Best regards,
         }
         defaults.update(template_vars)
 
-        lines = selected_template.strip().split("\n")
-        template_subject = "Partnership Opportunity"
-
-        if lines[0].startswith("Subject:"):
-            template_subject = lines[0].replace("Subject:", "").strip()
-            template_body = "\n".join(lines[1:]).strip()
-        else:
-            template_body = selected_template
+        subject = template.subject
+        text_body = template.text_body
+        html_body = template.html_body
 
         for key, value in defaults.items():
             placeholder = f"{{{{{key}}}}}"
-            template_subject = template_subject.replace(placeholder, str(value))
-            template_body = template_body.replace(placeholder, str(value))
+            replacement = str(value)
+            subject = subject.replace(placeholder, replacement)
+            text_body = text_body.replace(placeholder, replacement)
+            html_body = html_body.replace(placeholder, replacement)
 
-        preview = f"""
-{'=' * 60}
-TEMPLATE #{template_num}
-FROM: {EMAIL_USER}
-TO: {to_email}
-SUBJECT: {template_subject}
-{'=' * 60}
-
-{template_body}
-
-{'=' * 60}
-"""
-
-        return {
-            "subject": template_subject,
-            "body": template_body,
-            "preview": preview,
-            "company": company_name,
-            "to": to_email,
-            "template_number": template_num,
-        }
-
-
-class EmailPreview:
-    """Preview emails without sending (for human review)."""
-
-    def __init__(self, template_paths: Optional[list[str]] = None):
-        self.template_paths = template_paths or EMAIL_TEMPLATES
-        self.templates = self._load_templates()
-
-    def _load_templates(self) -> list[str]:
-        """Load all email templates from files."""
-        templates = []
-        for template_path in self.template_paths:
-            path = Path(template_path)
-            if path.exists():
-                templates.append(path.read_text())
-        
-        if not templates:
-            templates = [self._default_template()]
-        
-        return templates
-
-    def _get_random_template(self) -> str:
-        """Randomly select a template from available templates."""
-        return random.choice(self.templates)
-
-    def _default_template(self) -> str:
-        """Default outreach email template."""
-        return """Subject: Partnership Opportunity with {{company_name}}
-
-Hi {{company_name}} Team,
-
-I hope this message finds you well. I'm reaching out from {{sender_company}} to explore a potential partnership opportunity.
-
-After reviewing {{company_name}}'s work in {{industry}}, I believe there could be valuable synergies between our organizations.
-
-Would you be open to a brief conversation to explore how we might collaborate?
-
-Looking forward to hearing from you.
-
-Best regards,
-{{sender_name}}
-{{sender_title}}
-{{sender_company}}
-{{sender_phone}}
-"""
+        return RenderedTemplate(
+            template=template,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+        )
 
     def generate_preview(
         self,
         company_name: str,
         to_email: str,
-        template_number: Optional[int] = None,
+        template_id: Optional[int] = None,
         **template_vars,
     ) -> dict:
         """Generate email preview for review.
@@ -389,64 +356,45 @@ Best regards,
         Args:
             company_name: Name of the company
             to_email: Recipient email address
-            template_number: Specific template to use (1, 2, or 3). 
-                           If None, randomly selects a template.
+            template_id: Specific template ID to use.
             **template_vars: Variables for template substitution
 
         Returns:
-            Dict with subject, body, preview text, and template number used
+            Dict with subject, body, preview text, and template ID used
         """
-        # Select specific template or random one
-        if template_number and 1 <= template_number <= len(self.templates):
-            selected_template = self.templates[template_number - 1]
-        else:
-            selected_template = self._get_random_template()
-            template_number = self.templates.index(selected_template) + 1
+        if template_id is None:
+            raise ValueError("No template selected. Choose a template ID for preview.")
 
-        defaults = {
-            "company_name": company_name,
-            "sender_name": template_vars.get("sender_name", "Your Name"),
-            "sender_title": template_vars.get("sender_title", "Your Title"),
-            "sender_company": template_vars.get("sender_company", "Your Company"),
-            "sender_phone": template_vars.get("sender_phone", ""),
-            "industry": template_vars.get("industry", "your industry"),
-        }
-        defaults.update(template_vars)
+        selected_template = self.get_template(template_id)
 
-        lines = selected_template.strip().split("\n")
-        template_subject = "Partnership Opportunity"
-
-        if lines[0].startswith("Subject:"):
-            template_subject = lines[0].replace("Subject:", "").strip()
-            template_body = "\n".join(lines[1:]).strip()
-        else:
-            template_body = selected_template
-
-        for key, value in defaults.items():
-            placeholder = f"{{{{{key}}}}}"
-            template_subject = template_subject.replace(placeholder, str(value))
-            template_body = template_body.replace(placeholder, str(value))
+        rendered_template = self._render_template(
+            selected_template,
+            company_name,
+            **template_vars,
+        )
 
         preview = f"""
 {'=' * 60}
-TEMPLATE #{template_number}
+TEMPLATE #{selected_template.id}: {selected_template.name}
 FROM: {EMAIL_USER if 'EMAIL_USER' in globals() else 'your@email.com'}
 TO: {to_email}
-SUBJECT: {template_subject}
+SUBJECT: {rendered_template.subject}
 {'=' * 60}
 
-{template_body}
+{rendered_template.text_body}
 
 {'=' * 60}
 """
 
         return {
-            "subject": template_subject,
-            "body": template_body,
+            "subject": rendered_template.subject,
+            "body": rendered_template.text_body,
+            "html_body": rendered_template.html_body,
             "preview": preview,
             "company": company_name,
             "to": to_email,
-            "template_number": template_number,
+            "template_id": selected_template.id,
+            "template_name": selected_template.name,
         }
 
     def preview_all_templates(
@@ -461,9 +409,9 @@ SUBJECT: {template_subject}
             List of preview dicts, one for each template
         """
         previews = []
-        for i in range(len(self.templates)):
+        for template in self.get_templates():
             preview = self.generate_preview(
-                company_name, to_email, template_number=i + 1, **template_vars
+                company_name, to_email, template_id=template.id, **template_vars
             )
             previews.append(preview)
         return previews
