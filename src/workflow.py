@@ -202,25 +202,30 @@ class OutreachWorkflow:
 
     def _choose_template_interactive(self) -> Optional[TemplateRecord]:
         """Prompt user to select a template from available templates."""
-        templates = self.preview.templates
+        templates = self.preview.get_templates()
         if not templates:
             print("No templates available.")
             return None
 
         while True:
             print("\nChoose template to send:")
-            for index, template in enumerate(templates, start=1):
-                print(f"  [{index}] {template.name}")
+            for template in templates:
+                print(f"  [{template.id}] {template.name}")
             print("  [x] Cancel send")
 
-            choice = input("\nTemplate [1]: ").strip().lower() or "1"
+            default_template_id = str(templates[0].id)
+            choice = input(f"\nTemplate ID [{default_template_id}]: ").strip().lower() or default_template_id
             if choice == "x":
                 return None
             if choice.isdigit():
-                selected_index = int(choice)
-                if 1 <= selected_index <= len(templates):
-                    return templates[selected_index - 1]
-            print("Invalid selection. Please choose a valid template number.")
+                selected_template_id = int(choice)
+                selected_template = next(
+                    (template for template in templates if template.id == selected_template_id),
+                    None,
+                )
+                if selected_template is not None:
+                    return selected_template
+            print("Invalid selection. Please choose a valid template ID.")
 
     def _collect_required_template_vars(self, template: TemplateRecord, company: str) -> dict:
         """Prompt until all placeholders required by the selected template are set."""
@@ -264,7 +269,7 @@ class OutreachWorkflow:
             preview = self.preview.generate_preview(
                 company,
                 email,
-                template_number=selected_template.id,
+                template_id=selected_template.id,
                 **template_vars,
             )
 
@@ -304,7 +309,17 @@ class OutreachWorkflow:
 
     def _save_draft_local(self, row_idx: int, company: str, email: str):
         """Save email draft locally for review."""
-        preview = self.preview.generate_preview(company, email)
+        templates = self.preview.get_templates()
+        if not templates:
+            print("No templates available. Cannot create draft preview.")
+            return
+
+        preview = self.preview.generate_preview(
+            company,
+            email,
+            template_id=templates[0].id,
+            **self._build_template_vars(company),
+        )
         draft_file = f"draft_{company.replace(' ', '_').lower()}.txt"
 
         with open(draft_file, "w") as f:

@@ -165,12 +165,36 @@ class TemplateStore(DataStore):
 
         return resolved_path
 
-    def load_templates(self) -> list[TemplateRecord]:
-        """Load all templates from the database and validate their linked files.
-        
+    def _row_to_template_record(
+        self,
+        template_id: int,
+        name: str,
+        subject: str,
+        text_file: str,
+        html_file: str,
+    ) -> TemplateRecord:
+        """Build a template record from one database row and loaded files."""
+        resolved_text_path = self._resolve_template_path(text_file, "text_file")
+        resolved_html_path = self._resolve_template_path(html_file, "html_file")
+        rendered_text_file = self._template_db_value_to_path(text_file, "text_file").as_posix()
+        rendered_html_file = self._template_db_value_to_path(html_file, "html_file").as_posix()
+
+        return TemplateRecord(
+            id=template_id,
+            name=name,
+            subject=subject,
+            text_file=rendered_text_file,
+            html_file=rendered_html_file,
+            text_body=resolved_text_path.read_text(encoding="utf-8").strip(),
+            html_body=resolved_html_path.read_text(encoding="utf-8").strip(),
+        )
+
+    def get_templates(self) -> list[TemplateRecord]:
+        """Return all templates from the database with validated linked files.
+
         Returns:
             List of TemplateRecord objects with content loaded from disk
-            
+
         Raises:
             ValueError: If no templates exist or any template files are invalid
         """
@@ -188,23 +212,40 @@ class TemplateStore(DataStore):
                 f"No templates found in database: {self.db_path}. Add at least one row to the templates table."
             )
 
-        templates = []
-        for template_id, name, subject, text_file, html_file in rows:
-            resolved_text_path = self._resolve_template_path(text_file, "text_file")
-            resolved_html_path = self._resolve_template_path(html_file, "html_file")
-            rendered_text_file = self._template_db_value_to_path(text_file, "text_file").as_posix()
-            rendered_html_file = self._template_db_value_to_path(html_file, "html_file").as_posix()
-
-            templates.append(
-                TemplateRecord(
-                    id=template_id,
-                    name=name,
-                    subject=subject,
-                    text_file=rendered_text_file,
-                    html_file=rendered_html_file,
-                    text_body=resolved_text_path.read_text(encoding="utf-8").strip(),
-                    html_body=resolved_html_path.read_text(encoding="utf-8").strip(),
-                )
+        return [
+            self._row_to_template_record(
+                template_id,
+                name,
+                subject,
+                text_file,
+                html_file,
             )
+            for template_id, name, subject, text_file, html_file in rows
+        ]
 
-        return templates
+    def get_template(self, template_id: int) -> TemplateRecord:
+        """Return one template by ID with validated linked files.
+
+        Args:
+            template_id: Template ID from the templates table.
+
+        Returns:
+            TemplateRecord loaded from the database and disk.
+
+        Raises:
+            ValueError: If the template does not exist or files are invalid.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT id, name, subject, text_file, html_file
+                FROM templates
+                WHERE id = ?
+                """,
+                (template_id,),
+            ).fetchone()
+
+        if row is None:
+            raise ValueError(f"Template {template_id} does not exist")
+
+        return self._row_to_template_record(*row)

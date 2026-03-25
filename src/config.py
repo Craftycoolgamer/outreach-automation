@@ -52,6 +52,7 @@ CONTACT_PATHS = [
     "/get-in-touch",
     "/reach-out",
     "/request-a-demo",
+    "/demo-request",
 ]
 
 # Email patterns to extract
@@ -120,6 +121,27 @@ STATUS_FAILED = "Failed"
 
 # Maximum number of workers for parallel processing
 SCRAPER_MAX_WORKERS = 8
+
+# External iframe form scraping guardrails
+# These are common third-party form providers. Only these host suffixes
+# are eligible for external iframe fetches.
+EXTERNAL_FORM_IFRAME_PROVIDER_ALLOWLIST = [
+    "hsforms.com",        # HubSpot forms
+    "hubspot.com",        # HubSpot hosted endpoints
+    "typeform.com",       # Typeform
+    "jotform.com",        # Jotform
+    "formstack.com",      # Formstack
+    "wufoo.com",          # Wufoo
+    "cognitoforms.com",   # Cognito Forms
+    "paperform.co",       # Paperform
+    "formsite.com",       # Formsite
+    "docs.google.com",    # Google Forms
+]
+
+MAX_IFRAMES_PER_PAGE = int(os.getenv("MAX_IFRAMES_PER_PAGE", "5"))
+MAX_EXTERNAL_IFRAMES_PER_PAGE = int(os.getenv("MAX_EXTERNAL_IFRAMES_PER_PAGE", "2"))
+MAX_EXTERNAL_IFRAME_REDIRECTS = int(os.getenv("MAX_EXTERNAL_IFRAME_REDIRECTS", "1"))
+MAX_EXTERNAL_IFRAME_BYTES = int(os.getenv("MAX_EXTERNAL_IFRAME_BYTES", "1500000"))
 
 # Method values
 METHOD_EMAIL = "Email"

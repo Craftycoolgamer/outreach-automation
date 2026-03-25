@@ -37,7 +37,7 @@ class SmtpOutreach:
             db_path: Optional path to the SQLite application database.
         """
         self.template_store = TemplateStore(db_path)
-        self.templates = self._load_templates()
+        self.template_store.get_templates()
         self._validate_config()
 
     def _validate_config(self):
@@ -55,10 +55,6 @@ class SmtpOutreach:
                 f"Missing required email configuration: {', '.join(missing)}. "
                 "Please check your .env file."
             )
-
-    def _load_templates(self) -> list[TemplateRecord]:
-        """Load all email templates from the SQLite application store."""
-        return self.template_store.load_templates()
 
     def _render_template(
         self,
@@ -304,11 +300,14 @@ class EmailPreview:
 
     def __init__(self, db_path: Optional[str] = None):
         self.template_store = TemplateStore(db_path)
-        self.templates = self._load_templates()
 
-    def _load_templates(self) -> list[TemplateRecord]:
+    def get_templates(self) -> list[TemplateRecord]:
         """Load all email templates from the SQLite application store."""
-        return self.template_store.load_templates()
+        return self.template_store.get_templates()
+
+    def get_template(self, template_id: int) -> TemplateRecord:
+        """Load one template by ID from the SQLite application store."""
+        return self.template_store.get_template(template_id)
 
     def _render_template(
         self,
@@ -349,7 +348,7 @@ class EmailPreview:
         self,
         company_name: str,
         to_email: str,
-        template_number: Optional[int] = None,
+        template_id: Optional[int] = None,
         **template_vars,
     ) -> dict:
         """Generate email preview for review.
@@ -357,21 +356,16 @@ class EmailPreview:
         Args:
             company_name: Name of the company
             to_email: Recipient email address
-            template_number: Specific template ID to use.
+            template_id: Specific template ID to use.
             **template_vars: Variables for template substitution
 
         Returns:
-            Dict with subject, body, preview text, and template number used
+            Dict with subject, body, preview text, and template ID used
         """
-        if template_number is None:
+        if template_id is None:
             raise ValueError("No template selected. Choose a template ID for preview.")
 
-        selected_template = next(
-            (template for template in self.templates if template.id == template_number),
-            None,
-        )
-        if selected_template is None:
-            raise ValueError(f"Template {template_number} does not exist")
+        selected_template = self.get_template(template_id)
 
         rendered_template = self._render_template(
             selected_template,
@@ -399,7 +393,7 @@ SUBJECT: {rendered_template.subject}
             "preview": preview,
             "company": company_name,
             "to": to_email,
-            "template_number": selected_template.id,
+            "template_id": selected_template.id,
             "template_name": selected_template.name,
         }
 
@@ -415,9 +409,9 @@ SUBJECT: {rendered_template.subject}
             List of preview dicts, one for each template
         """
         previews = []
-        for i in range(len(self.templates)):
+        for template in self.get_templates():
             preview = self.generate_preview(
-                company_name, to_email, template_number=i + 1, **template_vars
+                company_name, to_email, template_id=template.id, **template_vars
             )
             previews.append(preview)
         return previews
